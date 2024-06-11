@@ -6,6 +6,7 @@
 package device
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/redpilllabs/wireguard-go/ratelimiter"
 	"github.com/redpilllabs/wireguard-go/rwcancel"
 	"github.com/redpilllabs/wireguard-go/tun"
+	"github.com/sagernet/sing/service/pause"
 )
 
 type Device struct {
@@ -86,9 +88,10 @@ type Device struct {
 		mtu    atomic.Int32
 	}
 
-	ipcMutex sync.RWMutex
-	closed   chan struct{}
-	log      *Logger
+	ipcMutex     sync.RWMutex
+	closed       chan struct{}
+	log          *Logger
+	pauseManager pause.Manager
 }
 
 // deviceState represents the state of a Device.
@@ -281,8 +284,9 @@ func (device *Device) SetPrivateKey(sk NoisePrivateKey) error {
 	return nil
 }
 
-func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
+func NewDevice(ctx context.Context, tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
 	device := new(Device)
+	device.pauseManager = pause.ManagerFromContext(ctx)
 	device.state.state.Store(uint32(deviceStateDown))
 	device.closed = make(chan struct{})
 	device.log = logger

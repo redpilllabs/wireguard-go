@@ -39,6 +39,10 @@ func (peer *Peer) NewTimer(expirationFunction func(*Peer)) *Timer {
 		timer.isPending = false
 		timer.modifyingLock.Unlock()
 
+		if pauseManager := peer.device.pauseManager; pauseManager != nil {
+			pauseManager.WaitActive()
+		}
+
 		expirationFunction(peer)
 	})
 	timer.Stop()
