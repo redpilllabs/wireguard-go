@@ -7,6 +7,7 @@ package device
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
 
@@ -39,7 +40,9 @@ func randDevice(t *testing.T) *Device {
 	}
 	tun := tuntest.NewChannelTUN()
 	logger := NewLogger(LogLevelError, "")
-	device := NewDevice(tun.TUN(), conn.NewDefaultBind(), logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	device := NewDevice(ctx, tun.TUN(), conn.NewDefaultBind(), logger)
 	device.SetPrivateKey(sk)
 	return device
 }

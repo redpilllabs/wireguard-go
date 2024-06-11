@@ -7,6 +7,7 @@ package device
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -14,11 +15,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redpilllabs/wireguard-go/conn"
+	"github.com/redpilllabs/wireguard-go/crypto"
+	"github.com/redpilllabs/wireguard-go/tun"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	"github.com/redpilllabs/wireguard-go/conn"
-	"github.com/redpilllabs/wireguard-go/tun"
 )
 
 /* Outbound flow
@@ -77,10 +79,39 @@ func (elem *QueueOutboundElement) clearPointers() {
 	elem.peer = nil
 }
 
+/* Generates and writes random a amount of dummy packets to circumvent Cloudflare WARP blockings
+ */
+func (peer *Peer) sendRandomPackets() {
+	numPackets := crypto.GenerateRandomInt(5, 10)
+	randomPacket := make([]byte, 100)
+	for i := 0; i < numPackets; i++ {
+		if peer.device.isClosed() || !peer.isRunning.Load() {
+			return
+		}
+
+		packetSize := crypto.GenerateRandomInt(40, 100)
+		_, err := rand.Read(randomPacket[:packetSize])
+		if err != nil {
+			return
+		}
+
+		err = peer.SendBuffers([][]byte{randomPacket[:packetSize]})
+		if err != nil {
+			return
+		}
+
+		time.Sleep(time.Duration(crypto.GenerateRandomInt(10, 100)) * time.Millisecond)
+	}
+}
+
 /* Queues a keepalive if no packets are queued for peer
  */
 func (peer *Peer) SendKeepalive() {
 	if len(peer.queue.staged) == 0 && peer.isRunning.Load() {
+		if peer.trick {
+			peer.device.log.Verbosef("%v - Running tricks! (keepalive)", peer)
+			peer.sendRandomPackets()
+		}
 		elem := peer.device.NewOutboundElement()
 		elemsContainer := peer.device.GetOutboundElementsContainer()
 		elemsContainer.elems = append(elemsContainer.elems, elem)
@@ -113,6 +144,12 @@ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
 		peer.handshake.mutex.Unlock()
 		return nil
 	}
+
+	if peer.trick {
+		peer.device.log.Verbosef("%v - Running tricks! (handshake)", peer)
+		peer.sendRandomPackets()
+	}
+
 	peer.handshake.lastSentHandshake = time.Now()
 	peer.handshake.mutex.Unlock()
 

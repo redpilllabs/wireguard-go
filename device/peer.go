@@ -56,6 +56,8 @@ type Peer struct {
 	cookieGenerator             CookieGenerator
 	trieEntries                 list.List
 	persistentKeepaliveInterval atomic.Uint32
+	trick                       bool    // Enable Wireguard tricks to unblock WARP
+	reserved                    [3]byte // Reserved field required for WARP connections
 }
 
 func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
@@ -132,6 +134,12 @@ func (peer *Peer) SendBuffers(buffers [][]byte) error {
 		peer.endpoint.clearSrcOnTx = false
 	}
 	peer.endpoint.Unlock()
+
+	for i := range buffers {
+		if len(buffers[i]) > 3 && buffers[i][0] > 0 && buffers[i][0] < 5 {
+			copy(buffers[i][1:4], peer.reserved[:])
+		}
+	}
 
 	err := peer.device.net.bind.Send(buffers, endpoint)
 	if err == nil {

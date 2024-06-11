@@ -8,17 +8,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
 	"strconv"
 
-	"golang.org/x/sys/unix"
 	"github.com/redpilllabs/wireguard-go/conn"
 	"github.com/redpilllabs/wireguard-go/device"
 	"github.com/redpilllabs/wireguard-go/ipc"
 	"github.com/redpilllabs/wireguard-go/tun"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -222,7 +223,10 @@ func main() {
 		return
 	}
 
-	device := device.NewDevice(tdev, conn.NewDefaultBind(), logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	device := device.NewDevice(ctx, tdev, conn.NewDefaultBind(), logger)
 
 	logger.Verbosef("Device started")
 
