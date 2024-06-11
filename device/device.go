@@ -6,6 +6,7 @@
 package device
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,8 @@ import (
 	"github.com/redpilllabs/wireguard-go/ratelimiter"
 	"github.com/redpilllabs/wireguard-go/rwcancel"
 	"github.com/redpilllabs/wireguard-go/tun"
+	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/pause"
 )
 
 type Device struct {
@@ -86,9 +89,10 @@ type Device struct {
 		mtu    atomic.Int32
 	}
 
-	ipcMutex sync.RWMutex
-	closed   chan struct{}
-	log      *Logger
+	ipcMutex     sync.RWMutex
+	closed       chan struct{}
+	log          *Logger
+	pauseManager pause.Manager
 }
 
 // deviceState represents the state of a Device.
@@ -281,8 +285,9 @@ func (device *Device) SetPrivateKey(sk NoisePrivateKey) error {
 	return nil
 }
 
-func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
+func NewDevice(ctx context.Context, tunDevice tun.Device, bind conn.Bind, logger *Logger, workers int) *Device {
 	device := new(Device)
+	device.pauseManager = service.FromContext[pause.Manager](ctx)
 	device.state.state.Store(uint32(deviceStateDown))
 	device.closed = make(chan struct{})
 	device.log = logger
@@ -308,10 +313,12 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
 
 	// start workers
 
-	cpus := runtime.NumCPU()
+	if workers == 0 {
+		workers = runtime.NumCPU()
+	}
 	device.state.stopping.Wait()
-	device.queue.encryption.wg.Add(cpus) // One for each RoutineHandshake
-	for i := 0; i < cpus; i++ {
+	device.queue.encryption.wg.Add(workers) // One for each RoutineHandshake
+	for i := 0; i < workers; i++ {
 		go device.RoutineEncryption(i + 1)
 		go device.RoutineDecryption(i + 1)
 		go device.RoutineHandshake(i + 1)

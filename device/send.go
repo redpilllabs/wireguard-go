@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redpilllabs/wireguard-go/conn"
+	"github.com/redpilllabs/wireguard-go/tun"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	"github.com/redpilllabs/wireguard-go/conn"
-	"github.com/redpilllabs/wireguard-go/tun"
 )
 
 /* Outbound flow
@@ -317,6 +317,30 @@ func (device *Device) RoutineReadFromTUN() {
 			}
 			return
 		}
+	}
+}
+
+func (device *Device) InputPacket(destination []byte, packetSlices [][]byte) {
+	peer := device.allowedips.Lookup(destination)
+	if peer == nil {
+		return
+	}
+	elem := device.NewOutboundElement()
+	packet := elem.buffer[MessageTransportHeaderSize:]
+	var n int
+	for _, packetSlice := range packetSlices {
+		n += copy(packet[n:], packetSlice)
+	}
+	elem.packet = packet[:n]
+	elemsForPeer := device.GetOutboundElementsContainer()
+	if peer.isRunning.Load() {
+		elemsForPeer.elems = append(elemsForPeer.elems, elem)
+		peer.StagePackets(elemsForPeer)
+		peer.SendStagedPackets()
+	} else {
+		device.PutMessageBuffer(elem.buffer)
+		device.PutOutboundElement(elem)
+		device.PutOutboundElementsContainer(elemsForPeer)
 	}
 }
 
