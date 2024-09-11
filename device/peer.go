@@ -7,6 +7,7 @@ package device
 
 import (
 	"container/list"
+	"encoding/base64"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/redpilllabs/wireguard-go/conn"
 )
+
+const WarpPublicKey = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 
 type Peer struct {
 	isRunning         atomic.Bool
@@ -56,6 +59,8 @@ type Peer struct {
 	cookieGenerator             CookieGenerator
 	trieEntries                 list.List
 	persistentKeepaliveInterval atomic.Uint32
+	isCloudflareWarp            bool    // Whether peer is a Cloudflare WARP endpoint
+	reserved                    [3]byte // Reserved field required for WARP connections
 }
 
 func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
@@ -107,6 +112,11 @@ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
 	// init timers
 	peer.timersInit()
 
+	if isPeerCloudflareWarp(peer.handshake.remoteStatic[:]) {
+		peer.isCloudflareWarp = true
+		peer.device.log.Verbosef("%v - detected a Cloudflare WARP peer", peer)
+	}
+
 	// add
 	device.peers.keyMap[pk] = peer
 
@@ -132,6 +142,14 @@ func (peer *Peer) SendBuffers(buffers [][]byte) error {
 		peer.endpoint.clearSrcOnTx = false
 	}
 	peer.endpoint.Unlock()
+
+	if peer.isCloudflareWarp {
+		for i := range buffers {
+			if len(buffers[i]) > 3 && buffers[i][0] > 0 && buffers[i][0] < 5 {
+				copy(buffers[i][1:4], peer.reserved[:])
+			}
+		}
+	}
 
 	err := peer.device.net.bind.Send(buffers, endpoint)
 	if err == nil {
@@ -293,4 +311,13 @@ func (peer *Peer) markEndpointSrcForClearing() {
 		return
 	}
 	peer.endpoint.clearSrcOnTx = true
+}
+
+func isPeerCloudflareWarp(publicKey []byte) bool {
+	publicKeyStr := base64.StdEncoding.EncodeToString(publicKey)
+	if publicKeyStr == WarpPublicKey {
+		return true
+	}
+
+	return false
 }

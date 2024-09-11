@@ -119,6 +119,7 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 			sendf("tx_bytes=%d", peer.txBytes.Load())
 			sendf("rx_bytes=%d", peer.rxBytes.Load())
 			sendf("persistent_keepalive_interval=%d", peer.persistentKeepaliveInterval.Load())
+			sendf("reserved=%d,%d,%d", peer.reserved[0], peer.reserved[1], peer.reserved[2])
 
 			device.allowedips.EntriesForPeer(peer, func(prefix netip.Prefix) bool {
 				sendf("allowed_ip=%s", prefix.String())
@@ -338,7 +339,7 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 		}
 
 	case "endpoint":
-		device.log.Verbosef("%v - UAPI: Updating endpoint", peer.Peer)
+		device.log.Verbosef("%v - UAPI: Updating endpoint to %v", peer.Peer, value)
 		endpoint, err := device.net.bind.ParseEndpoint(value)
 		if err != nil {
 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set endpoint %v: %w", value, err)
@@ -385,6 +386,33 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 		if value != "1" {
 			return ipcErrorf(ipc.IpcErrorInvalid, "invalid protocol version: %v", value)
 		}
+
+	case "is_warp":
+		device.log.Verbosef("%v - UAPI: Setting WARP mode: %s", peer.Peer, value)
+		parsedBool, err := strconv.ParseBool(value)
+		if err != nil {
+			return ipcErrorf(ipc.IpcErrorInvalid, "invalid warp value: %v", value)
+		}
+		peer.isCloudflareWarp = parsedBool
+
+	case "reserved":
+		device.log.Verbosef("%v - UAPI: Setting reserved: %s", peer.Peer, value)
+		vals := strings.Split(value, ",")
+		if len(vals) != 3 {
+			return ipcErrorf(ipc.IpcErrorInvalid, "invalid reserved value: %v", value)
+		}
+		reserved := [3]byte{}
+		for i, val := range vals {
+			parsed, err := strconv.Atoi(val)
+			if err != nil {
+				return ipcErrorf(ipc.IpcErrorInvalid, "invalid reserved value: %v", value)
+			}
+			if parsed < 0 || parsed > 0xff {
+				return ipcErrorf(ipc.IpcErrorInvalid, "invalid reserved value: %v", value)
+			}
+			reserved[i] = uint8(parsed)
+		}
+		peer.reserved = reserved
 
 	default:
 		return ipcErrorf(ipc.IpcErrorInvalid, "invalid UAPI peer key: %v", key)
