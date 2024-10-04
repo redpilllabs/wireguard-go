@@ -186,6 +186,7 @@ func (device *Device) upLocked() error {
 	device.peers.RLock()
 	for _, peer := range device.peers.keyMap {
 		peer.Start()
+		peer.SendHandshakeInitiation(false)
 		if peer.persistentKeepaliveInterval.Load() > 0 {
 			peer.SendKeepalive()
 		}

@@ -212,7 +212,7 @@ func (device *Device) handleDeviceLine(key, value string) error {
 		}
 
 		// update port and rebind
-		device.log.Verbosef("UAPI: Updating listen port")
+		device.log.Verbosef("UAPI: Updating listen port to %d", port)
 
 		device.net.Lock()
 		device.net.port = uint16(port)
@@ -264,6 +264,7 @@ func (peer *ipcSetPeer) handlePostConfig() {
 	}
 	if peer.device.isUp() {
 		peer.Start()
+		peer.SendHandshakeInitiation(false)
 		if peer.pkaOn {
 			peer.SendKeepalive()
 		}
@@ -338,8 +339,8 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 		}
 
 	case "endpoint":
-		device.log.Verbosef("%v - UAPI: Updating endpoint", peer.Peer)
 		endpoint, err := device.net.bind.ParseEndpoint(value)
+		device.log.Verbosef("%v - UAPI: Updating endpoint to %v", peer.Peer, endpoint.DstToString())
 		if err != nil {
 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set endpoint %v: %w", value, err)
 		}
@@ -348,9 +349,8 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 		peer.endpoint.val = endpoint
 
 	case "persistent_keepalive_interval":
-		device.log.Verbosef("%v - UAPI: Updating persistent keepalive interval", peer.Peer)
-
 		secs, err := strconv.ParseUint(value, 10, 16)
+		device.log.Verbosef("%v - UAPI: Updating persistent keepalive interval to %d", peer.Peer, secs)
 		if err != nil {
 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set persistent keepalive interval: %w", err)
 		}
@@ -371,8 +371,8 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 		device.allowedips.RemoveByPeer(peer.Peer)
 
 	case "allowed_ip":
-		device.log.Verbosef("%v - UAPI: Adding allowedip", peer.Peer)
 		prefix, err := netip.ParsePrefix(value)
+		device.log.Verbosef("%v - UAPI: Adding allowedip: %v", peer.Peer, prefix.String())
 		if err != nil {
 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set allowed ip: %w", err)
 		}
@@ -384,6 +384,16 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 	case "protocol_version":
 		if value != "1" {
 			return ipcErrorf(ipc.IpcErrorInvalid, "invalid protocol version: %v", value)
+		}
+
+	case "enable_warp_noise_gen":
+		isWarpNoiseGenEnabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return ipcErrorf(ipc.IpcErrorInvalid, "failed enabling warp unblocker: %w", err)
+		}
+		if isWarpNoiseGenEnabled {
+			device.log.Verbosef("%v - UAPI: Enabling WARP noise generator", peer.Peer)
+			peer.enableWarpNoiseGen = isWarpNoiseGenEnabled
 		}
 
 	default:

@@ -56,6 +56,8 @@ type Peer struct {
 	cookieGenerator             CookieGenerator
 	trieEntries                 list.List
 	persistentKeepaliveInterval atomic.Uint32
+	enableWarpNoiseGen          bool // Enable noise packet gen to unblock a Cloudflare WARP endpoint
+	reserved                    [3]byte
 }
 
 func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
@@ -131,6 +133,7 @@ func (peer *Peer) SendBuffers(buffers [][]byte) error {
 		endpoint.ClearSrc()
 		peer.endpoint.clearSrcOnTx = false
 	}
+
 	peer.endpoint.Unlock()
 
 	err := peer.device.net.bind.Send(buffers, endpoint)
