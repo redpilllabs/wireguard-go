@@ -7,6 +7,7 @@ package device
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/redpilllabs/wireguard-go/conn"
+	"github.com/redpilllabs/wireguard-go/crypto"
 	"github.com/redpilllabs/wireguard-go/tun"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/net/ipv4"
@@ -77,10 +79,54 @@ func (elem *QueueOutboundElement) clearPointers() {
 	elem.peer = nil
 }
 
+/* Generates and writes random a amount of dummy packets to circumvent Cloudflare WARP blockings
+ */
+func (peer *Peer) sendRandomPackets(minSize int, maxSize int, minSleep int, maxSleep int) {
+	clist := []byte{0xDC, 0xDE, 0xD3, 0xD9, 0xD0, 0xEC, 0xEE, 0xE3}
+	packetHeader := []byte{
+		clist[crypto.GenerateRandomInt(0, len(clist)-1)],
+		0x00, 0x00, 0x00, 0x01, 0x08,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x44, 0xD0,
+	}
+	_, err := rand.Read(packetHeader[6:14])
+	if err != nil {
+		panic(err)
+	}
+
+	numPackets := crypto.GenerateRandomInt(minSize, maxSize)
+	maxPacketSize := len(packetHeader) + 120
+
+	randomPacket := make([]byte, maxPacketSize)
+	for i := 0; i < numPackets; i++ {
+		if peer.device.isClosed() || !peer.isRunning.Load() {
+			return
+		}
+
+		packetSize := crypto.GenerateRandomInt(len(packetHeader)+10, maxPacketSize)
+		_, err := rand.Read(randomPacket[len(packetHeader):packetSize])
+		if err != nil {
+			return
+		}
+		copy(randomPacket[0:], packetHeader)
+
+		err = peer.SendBuffers([][]byte{randomPacket[:packetSize]})
+		if err != nil {
+			return
+		}
+
+		time.Sleep(time.Duration(crypto.GenerateRandomInt(minSleep, maxSleep)) * time.Millisecond)
+	}
+}
+
 /* Queues a keepalive if no packets are queued for peer
  */
 func (peer *Peer) SendKeepalive() {
 	if len(peer.queue.staged) == 0 && peer.isRunning.Load() {
+		if peer.tryUnblockWarp {
+			peer.device.log.Verbosef("%v - Trying to unblock WARP before sending a keepalive packet to endpoint %v", peer, peer.endpoint.val.DstIP().String())
+			peer.sendRandomPackets(40, 100, 1, 5)
+		}
 		elem := peer.device.NewOutboundElement()
 		elemsContainer := peer.device.GetOutboundElementsContainer()
 		elemsContainer.elems = append(elemsContainer.elems, elem)
@@ -113,10 +159,16 @@ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
 		peer.handshake.mutex.Unlock()
 		return nil
 	}
+
+	if peer.tryUnblockWarp {
+		peer.device.log.Verbosef("%v - Trying to unblock WARP before a handshake with endpoint %v", peer, peer.endpoint.val.DstIP().String())
+		peer.sendRandomPackets(40, 100, 1, 5)
+	}
+
 	peer.handshake.lastSentHandshake = time.Now()
 	peer.handshake.mutex.Unlock()
 
-	peer.device.log.Verbosef("%v - Sending handshake initiation", peer)
+	peer.device.log.Verbosef("%v - Sending handshake initiation to endpoint %v", peer, peer.endpoint.val.DstIP().String())
 
 	msg, err := peer.device.CreateMessageInitiation(peer)
 	if err != nil {
