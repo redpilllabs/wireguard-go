@@ -7,6 +7,7 @@ package device
 
 import (
 	"container/list"
+	"encoding/base64"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/redpilllabs/wireguard-go/conn"
 )
+
+const WarpPublicKey = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 
 type Peer struct {
 	isRunning         atomic.Bool
@@ -56,6 +59,7 @@ type Peer struct {
 	cookieGenerator             CookieGenerator
 	trieEntries                 list.List
 	persistentKeepaliveInterval atomic.Uint32
+	tryUnblockWarp              bool // Whether enable noise maker to unblock a Cloudflare WARP endpoint
 }
 
 func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
@@ -131,6 +135,7 @@ func (peer *Peer) SendBuffers(buffers [][]byte) error {
 		endpoint.ClearSrc()
 		peer.endpoint.clearSrcOnTx = false
 	}
+
 	peer.endpoint.Unlock()
 
 	err := peer.device.net.bind.Send(buffers, endpoint)
@@ -293,4 +298,13 @@ func (peer *Peer) markEndpointSrcForClearing() {
 		return
 	}
 	peer.endpoint.clearSrcOnTx = true
+}
+
+func isPeerCloudflareWarp(publicKey []byte) bool {
+	publicKeyStr := base64.StdEncoding.EncodeToString(publicKey)
+	if publicKeyStr == WarpPublicKey {
+		return true
+	}
+
+	return false
 }
