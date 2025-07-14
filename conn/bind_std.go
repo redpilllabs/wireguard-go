@@ -387,6 +387,16 @@ func (s *StdNetBind) Send(bufs [][]byte, endpoint Endpoint) error {
 		retried bool
 		err     error
 	)
+
+	for _, buf := range bufs {
+		if len(buf) > 3 {
+			reserved, loaded := s.reservedForEndpoint[endpoint.(*StdNetEndpoint).AddrPort]
+			if loaded {
+				copy(buf[1:4], reserved[:])
+			}
+		}
+	}
+
 retry:
 	if offload {
 		n := coalesceMessages(ua, endpoint.(*StdNetEndpoint), bufs, *msgs, setGSOSize)
